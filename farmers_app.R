@@ -13,7 +13,7 @@ library("shinythemes")
 user_interface <-
   fluidPage(
     theme = shinytheme("superhero"),
-    titlePanel("Cimatic Data Visualization s and Insights For Farmers"),
+    titlePanel("Cimatic Data Visualizations and Insights For Farmers"),
     sidebarLayout(
       sidebarPanel = sidebarPanel(
         fileInput(
@@ -31,7 +31,7 @@ user_interface <-
       ),
       mainPanel = mainPanel(tabsetPanel(
         tabPanel(title = "Inventory Plot", plotOutput("inv_plot")),
-        tabPanel(title = "Boxplot Summaries", plotOutput("box_plot")),
+        tabPanel(title = "Boxplot Summaries", plotOutput("box_plot"), width = "100%", height = "100%"),
         tabPanel(title = "Element Summaries", dataTableOutput("sum_vales")),
         tabPanel(title = "View Data", dataTableOutput("data_sec"))
       ))
@@ -48,11 +48,11 @@ r_manipulations <- function(input, output) {
     if (is.null(temp_file))
       return("No Data in The Memory")
     if (stringr::str_detect(temp_file, ".csv")) {
-      fild <- read.csv(temp_file$datapath, na.strings = c("missing"))
+      fild <- read.csv(temp_file$datapath, na.strings = c("missing", "", " "))
     } else if (stringr::str_detect(temp_file, ".dta")) {
-      fild <- haven::read_dta(temp_file$datapath, na = "missing")
+      fild <- haven::read_dta(temp_file$datapath, na = c("missing", "", " "))
     } else if (stringr::str_detect(temp_file, ".xlsx")) {
-      fild <- openxlsx::read.xlsx(temp_file$datapath, na = "missing")
+      fild <- openxlsx::read.xlsx(temp_file$datapath, na = c("missing", "", " "))
     }
     
   })
@@ -86,16 +86,16 @@ r_manipulations <- function(input, output) {
     library(dplyr)
     if (input$station_input == "stations") {
       summ_data <- cli_data()
-      summ_data %>% group_by(year = as.factor(year), stations = as.factor(stations)) %>%
-        summarise(
+      summ_data %>% group_by(year, stations) %>%
+        summarize(
           rain_sum = sum(rain, na.rm = T),
-          average_rain = mean(rain,
-                              na.rm = T),
+          average_rain = mean(rain,na.rm = T),
           min_rainfall = min(rain, na.rm = T),
           maximum_rainfall =
             max(rain, na.rm = T),
-          sum_missing = sum(is.na(rain))
-        )
+          sum_missing = sum(is.na(rain), na.rm = T),
+          days_in_a_year = max(doy, na.rm = T))
+        
       
     } else{
       "Load the data to continue"
@@ -145,7 +145,7 @@ r_manipulations <- function(input, output) {
         panel.grid.minor = element_blank(),
         plot.title = element_text(hjust = 0.5, size = 24),
         axis.title = element_text(size = 16)
-      ) + xlab("Year") + ylab("Rainfall Amount")},
+      ) + xlab("Year") + ylab("Rainfall Amount")+coord_flip()},
     error= function(w){w<-"Load data to continue";return(w)})
   })
   
