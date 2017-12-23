@@ -12,35 +12,55 @@ library("shinythemes")
 
 user_interface <-
   fluidPage(
-    theme = shinytheme("superhero"),
-    titlePanel("Cimatic Data Visualizations and Insights For Farmers"),
+    titlePanel("Climatic data visualizations and insights"),
     sidebarLayout(
       sidebarPanel = sidebarPanel(
         fileInput(
           inputId = "dt_file",
-          label = "Import Climatic Data",
+          label = "csv, xlsx and stata(dta) files only:",
           accept = c(".csv", ".dta", ".txt", ".xlsx"),
           placeholder = "data not loaded",
           multiple = FALSE
         ),
-        uiOutput(outputId = "station"),
+        uiOutput(outputId = "year_val_start"),
+        uiOutput(outputId = "year_val_end"),
+        uiOutput(outputId = "month_val"),
+        h4("Column Name(s)"),
         uiOutput(outputId = "cli_element"),
-        uiOutput(outputId = "date_col"),
         uiOutput(outputId = "doy"),
-        uiOutput(outputId = "year_col")
+        uiOutput(outputId = "station"),
+        
+         shinythemes::themeSelector()
       ),
-      mainPanel = mainPanel(tabsetPanel(
-        tabPanel(title = "Inventory Plot", plotOutput("inv_plot")),
-        tabPanel(title = "Boxplot Summaries", plotOutput("box_plot"), width = "100%", height = "100%"),
-        tabPanel(title = "Element Summaries", dataTableOutput("sum_vales")),
-        tabPanel(title = "View Data", dataTableOutput("data_sec"))
+      mainPanel = mainPanel( tags$head(tags$style(type="text/css", "
+             #loadmessage {
+                                                  position: fixed;
+                                                  top: 0px;
+                                                  left: 0px;
+                                                  width: 100%;
+                                                  padding: 5px 0px 5px 0px;
+                                                  text-align: center;
+                                                  font-weight: bold;
+                                                  font-size: 100%;
+                                                  color: #000000;
+                                                  background-color:#0000ff;
+                                                  z-index: 105;
+                                                  }
+                                                  ")),
+        tabsetPanel(
+        tabPanel(title = "Inventory Plot", plotOutput("inv_plot"),helpText("To load Inventory Plot Please select doy from Days dropdown")),
+        tabPanel(title = "Annual Boxplot Summaries", plotOutput("box_plot"), width = "100%", height = "100%"),
+        tabPanel(title = "Monthly Histograms", plotOutput("hist_plots"),helpText(paste("To load Monthly Histogram Plot Please select day_in_month from Days dropdown.", "Start year value and end year value should be the same"))),
+        tabPanel(title = "Yearly Element Summaries", dataTableOutput("sum_vales")),
+        tabPanel(title = "View Data", dataTableOutput("data_sec")),
+        conditionalPanel(condition="$('html').hasClass('shiny-busy')",
+                         tags$div("Loading...",id="loadmessage"))
       ))
     )
   )
 
 r_manipulations <- function(input, output) {
   #Set desired file limit
-  if (Sys.getenv('SHINY_PORT') == "")
     options(shiny.maxRequestSize = 10000 * 1024 ^ 2)
   #Loading Data
   cli_data <- reactive({
@@ -48,44 +68,98 @@ r_manipulations <- function(input, output) {
     if (is.null(temp_file))
       return("No Data in The Memory")
     if (stringr::str_detect(temp_file, ".csv")) {
-      fild <- read.csv(temp_file$datapath, na.strings = c("missing", "", " "))
+      fild <- data.table::fread(temp_file$datapath, na.strings = c("missing", "", " ", "NA"))
     } else if (stringr::str_detect(temp_file, ".dta")) {
-      fild <- haven::read_dta(temp_file$datapath, na = c("missing", "", " "))
+      fild <- haven::read_dta(temp_file$datapath, na = c("missing", "", " ", "NA"))
     } else if (stringr::str_detect(temp_file, ".xlsx")) {
-      fild <- openxlsx::read.xlsx(temp_file$datapath, na = c("missing", "", " "))
+      fild <- openxlsx::read.xlsx(temp_file$datapath, na = c("missing", "", " ", "NA"))
     }
     
   })
   
+  start_vals <- reactive({
+    values<- cli_data()[,"year"]
+    values <- sort.int(as.integer(unlist((values[!duplicated(values)]))))
+  
+  })
+  
+  month_vals <- reactive({
+    values<- cli_data()[,"month"]
+    values <- values[!duplicated(values)]
+    
+  })
+  
+  output$month_val <- renderUI({
+tryCatch({selectInput("month_values", choices = month_vals(), label = "Month Values:")},error= function(w){w<-"";return(w)})
+  })
+  
+  end_vals <- reactive({
+    nam <- names(cli_data())[which(names(cli_data()) == "year")]
+    values<- cli_data()[,"year"]
+    values <- sort.int(as.integer(unlist((values[!duplicated(values)]))), decreasing = TRUE)
+  })
+  
+  output$year_val_start <- renderUI({
+      tryCatch({selectInput("year_val_start", choices = start_vals(), label = "Start Year Value:")},error= function(w){w<-"";return(w)})
+  })
+
+  output$year_val_end <- renderUI({
+    tryCatch({ selectInput("year_val_end", choices = end_vals(), label = "End Year Value:")},error= function(w){w<-"";return(w)})
+  })
+
   output$date_col <- renderUI({
     nam <- names(cli_data())[which(names(cli_data()) == "date_col")]
-    selectInput("date_input", choices = nam, label = "Date")
+    selectInput("date_input", choices = nam, label = "Date:")
   })
   output$doy <- renderUI({
-    nam <- names(cli_data())[which(names(cli_data()) == "doy")]
-    selectInput("doy_input", choices = nam, label = "Day of Year")
+   tryCatch({nam <- names(cli_data())[which(names(cli_data()) == "doy")]
+    nam1 <- names(cli_data())[which(names(cli_data()) == "day_in_month")]
+    selectInput("doy_input", choices = list(nam, nam1), label = "Days:")},error= function(w){w<-"";return(w)})
   })
   output$station <- renderUI({
     nam <- names(cli_data())[which(names(cli_data()) == "stations")]
-    selectInput("station_input", choices = nam, label = "Stations")
-  })
-  output$year_col <- renderUI({
-    nam <- names(cli_data())[which(names(cli_data()) == "year")]
-    selectInput("year_input", choices = nam, label = "Year")
-  })
-  output$cli_element <- renderUI({
-    nam <-
-      names(cli_data())[!stringr::str_detect(names(cli_data()), pattern = "year|stations|doy|date_col")]
-    selectInput("cli_input", choices = nam, label = "Climate Element")
-  })
-  output$data_sec <- renderDataTable({
-    data.frame(cli_data())
+    selectInput("station_input", choices = nam, label = "Stations:")
   })
   
+  output$hist_plots<- renderPlot({
+    tryCatch({if(input$doy_input!="doy" && input$year_val_start==input$year_val_end){
+   plot_data<-as.data.frame(hist_data())
+  ggplot(plot_data, mapping = aes(x= day_in_month, y= rain, fill= "rainfall amount"))+geom_histogram(stat = "identity")}},error= function(w){w<-"Load data to continue";return(w)})
+        
+  })
+  
+
+
+  output$cli_element <- renderUI({
+    nam <-
+      names(cli_data())[!stringr::str_detect(names(cli_data()), pattern = "year|stations|doy|date_col|day_in_month|month")]
+    selectInput("cli_input", choices = nam, label = "Climate Element:")
+  })
+  output$data_sec <- renderDataTable({
+    tryCatch({data.frame(inv_data())},error= function(w){w<-"Load data to continue";return(w)})
+  })
+  
+   inv_data <- reactive({
+    start_data <- cli_data()
+    y1= as.integer(unlist(input$year_val_start))
+    y2= as.integer(unlist(input$year_val_end))
+    dplyr::filter(start_data, year%in% y1:y2)
+  })
+   
+   hist_data<- reactive({
+     start_year<-input$year_val_start
+     end_year<-input$year_val_end
+     if(start_year==end_year){ 
+       month_lab<- input$month_values
+       month_d <- as.data.frame(cli_data())
+       filter(month_d, month==month_lab & year==start_year)
+      }
+     })
+   
   summaries <- reactive({
     library(dplyr)
     if (input$station_input == "stations") {
-      summ_data <- cli_data()
+      summ_data <- inv_data()
       summ_data %>% group_by(year, stations) %>%
         summarize(
           rain_sum = sum(rain, na.rm = T),
@@ -104,7 +178,9 @@ r_manipulations <- function(input, output) {
   })
   
   output$inv_plot <- renderPlot({
-     tryCatch({Full_data <- cli_data()
+     tryCatch({if(input$doy_input=="doy"){
+       
+       Full_data <- inv_data()
     #Preparing inventory plot for Quality Control
     x1 <-
       as.data.frame(ifelse(
@@ -127,14 +203,13 @@ r_manipulations <- function(input, output) {
     ggplot(Full_data, mapping = aes(x = year, y = doy, col = recoded_rain)) + geom_point() + xlab("Year") +
       ylab("Day of the Year") + ggtitle("Inventory plot for Quality Control") +
       theme(plot.title =
-              element_text(hjust = 0.5)) + guides(color = guide_legend(title = "Rainy and Missing")) +
-      theme_dark()},error= function(w){w<-"Load data to continue";return(w)})
+              element_text(hjust = 0.5)) + guides(color = guide_legend(title = "Rainy and Missing"))+theme_light()}},error= function(w){w<-"Load data to continue";return(w)})
   
   })
   output$box_plot <- renderPlot({
   
     tryCatch({
-    Full_data <- cli_data()
+    Full_data <- inv_data()
     ggplot(data = Full_data,
            mapping = aes(
              x = as.factor(year),
@@ -145,7 +220,7 @@ r_manipulations <- function(input, output) {
         panel.grid.minor = element_blank(),
         plot.title = element_text(hjust = 0.5, size = 24),
         axis.title = element_text(size = 16)
-      ) + xlab("Year") + ylab("Rainfall Amount")+coord_flip()},
+      ) + xlab("Year") + ylab("Rainfall Amount")+coord_flip()+theme_light()},
     error= function(w){w<-"Load data to continue";return(w)})
   })
   
