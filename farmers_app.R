@@ -1,14 +1,10 @@
-#App for farmers Insights.
-library("shiny")
-library("ggplot2")
-library("dplyr")
-library("shinythemes")
+#Climatic Data Visualizations
+
 #Load packages
-#req_libs <- c("shiny", "shinythemes", "dplyr", "ggplot2")
-# pack_list <- installed.packages()[1:nrow(installed.packages())]
-# to_be_installed <- req_libs[!(req_libs %in% pack_list)]
-# if(length(to_be_installed)>0) lapply(to_be_installed, FUN = install.packages)
-# lapply(req_libs, FUN = library, character.only=TRUE)
+library(shiny)
+library(shinythemes)
+library(ggplot2)
+library(plotly)
 
 user_interface <-
   fluidPage(
@@ -26,9 +22,10 @@ user_interface <-
         uiOutput(outputId = "year_val_start"),
         uiOutput(outputId = "year_val_end"),
         uiOutput(outputId = "month_val"),
-        h4("Element and Days Name(s)"),
         uiOutput(outputId = "cli_element"),
+        sliderInput(inputId = "threshold", label = "Threshold (Use it onn Inventory plot):", min = 0, max = 1, value = 0.8),
         uiOutput(outputId = "doy"),
+        actionButton("goButton", "Submit"),
         shinythemes::themeSelector()
       ),
       mainPanel = mainPanel(
@@ -55,19 +52,19 @@ user_interface <-
         tabsetPanel(
           tabPanel(
             title = "Inventory Plot",
-            plotOutput("inv_plot"),
+            plotlyOutput("inv_plot"),
             helpText("NOTE: To load Inventory Plot Please select doy from Days dropdown")
           ),
           tabPanel(
             title = "Annual Boxplot Summaries",
-            plotOutput("box_plot"),
+            plotlyOutput("box_plot"),
             width = "100%",
             height = "100%"
           ),
-          tabPanel(title = "Monthly Histograms", plotOutput("hist_plots"), helpText(
+          tabPanel(title = "Monthly Histograms", plotlyOutput("hist_plots"), helpText(
             paste(
               "NOTE: To load Monthly Histogram Plot Please select day_in_month from Days dropdown.",
-              "Start year value and end year value should be the same"
+              "Start year value and end year value should be the same."
             )
           )),
           tabPanel(title = "Yearly Element Summaries", dataTableOutput("sum_vales")),
@@ -83,7 +80,7 @@ r_manipulations <- function(input, output) {
   #Set desired file limit
   options(shiny.maxRequestSize = 10000 * 1024 ^ 2)
   #Loading Data
-  cli_data <- reactive({
+    cli_data <- reactive({
     temp_file <- input$dt_file
     if (is.null(temp_file))
       return("No Data in The Memory")
@@ -109,7 +106,7 @@ r_manipulations <- function(input, output) {
   })
   
   hist_data<- reactive({
-    start_year<-input$year_val_start
+      start_year<-input$year_val_start
     end_year<-input$year_val_end
     stations_values<- input$station_vals
     if(start_year==end_year){ 
@@ -161,7 +158,7 @@ r_manipulations <- function(input, output) {
   #Outputs
   
   output$month_val <- renderUI({
-    tryCatch({selectInput("month_values", choices = month_vals(), label = "Month Values:")},error= function(w){w<-"";return(w)})
+    tryCatch({selectInput("month_values", choices = month_vals(), label = "Month Values (Use it on Histogram):")},error= function(w){w<-"";return(w)})
   })
   
   
@@ -187,10 +184,12 @@ r_manipulations <- function(input, output) {
     selectInput("doy_input", choices = list(nam, nam1), label = "Days:")},error= function(w){w<-"";return(w)})
   })
   
-  output$hist_plots<- renderPlot({
-    tryCatch({if(input$doy_input!="doy" && input$year_val_start==input$year_val_end && !is.null(input$station_vals)){
+  output$hist_plots<- renderPlotly({
+    req(input$goButton)
+     tryCatch({if(input$doy_input!="doy" && input$year_val_start==input$year_val_end && !is.null(input$station_vals)){
       plot_data<-as.data.frame(hist_data())
-      ggplot(plot_data, mapping = aes(x= day_in_month, y= rain))+geom_histogram(stat = "identity", aes(fill="blue")) + guides(fill=FALSE)+ggtitle(label = paste(input$month_values,input$year_val_start, "Rainfall Distribution", sep = " "))+theme(plot.title = element_text(hjust = 0.5))+theme_light()+xlab("Month Days")+ylab("Amount of Rainfall")+theme(panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5, size = 24))}},error= function(w){w<-"Load data to continue";return(w)})
+      month<-input$month_values
+     p<- ggplot(plot_data, mapping = aes(x= day_in_month, y= rain))+geom_histogram(stat = "identity", aes(fill= month)) + guides(fill=FALSE)+ggtitle(label = paste(input$month_values,input$year_val_start, "Rainfall Distribution", sep = " "))+theme_light()+xlab("Month Days")+ylab("Amount of Rainfall (mm)")+theme(panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5, size = 18), legend.position = "none")}else{warning("Check Length of Data")}},error= function(w){w<-NULL;return(w)})
     
   })
   
@@ -207,7 +206,8 @@ r_manipulations <- function(input, output) {
   
   
   
-  output$inv_plot <- renderPlot({
+  output$inv_plot <- renderPlotly({
+    req(input$goButton)
     tryCatch({if(input$doy_input=="doy" & !is.null(input$station_vals)){
       
       Full_data <- inv_data()
@@ -215,12 +215,12 @@ r_manipulations <- function(input, output) {
       x1 <-
         as.data.frame(ifelse(
           Full_data$rain == 0 |
-            Full_data$rain < 0.8,
+            Full_data$rain < input$threshold,
           "dry",
           ifelse(is.na(Full_data$rain), "missing", "rain")
         ))
       
-      Full_data$recoded_rain <-
+      Full_data$Status<-
         as.vector(apply(
           x1,
           2,
@@ -230,16 +230,17 @@ r_manipulations <- function(input, output) {
         ))
       Full_data <- arrange(Full_data, year)
       
-      ggplot(Full_data, mapping = aes(x = year, y = doy, col = recoded_rain)) + geom_point() + xlab("Year") +
-        ylab("Day of the Year") + ggtitle("Inventory plot for Quality Control") +theme_light()+
+     isolate(ggplot(Full_data, mapping = aes(x = year, y = doy, col = Status)) + geom_point() + xlab("Year") +
+        ylab("Day of the Year") + ggtitle(paste0("Inventory plot for ", input$year_val_start, "-", input$year_val_end)) +theme_light()+
         theme(
           panel.grid.minor = element_blank(),
-          plot.title = element_text(hjust = 0.5, size = 24)) + guides(color = guide_legend(title = "Rainy and Missing"))}},error= function(w){w<-"Load data to continue";return(w)})
+          legend.position = "none",
+          plot.title = element_text(hjust = 0.5, size = 18)))}},error= function(w){w<-"Load data to continue";return(w)})
     
   })
-  output$box_plot <- renderPlot({
-    
-    tryCatch({if(!is.null(input$station_vals)){
+  output$box_plot <- renderPlotly({
+       req(input$goButton)
+      tryCatch({if(!is.null(input$station_vals)){
       Full_data <- inv_data()
       ggplot(data = Full_data,
              mapping = aes(
@@ -247,13 +248,14 @@ r_manipulations <- function(input, output) {
                y = rain,
                fill = as.factor(year)
              )) + geom_boxplot() +
-        ggtitle("Annual Rainfall Variation")+theme_light() + theme(
+        ggtitle(paste0("Annual Rainfall Variation for ",input$year_val_start, "-", input$year_val_end))+theme_light() + theme(
           panel.grid.minor = element_blank(),
-          plot.title = element_text(hjust = 0.5, size = 24),
+          plot.title = element_text(hjust = 0.5, size = 18),
+          legend.position = "none",
           axis.title = element_text(size = 16)
-        ) + xlab("Year") + ylab("Rainfall Amount")+coord_flip()}},
+        )+ xlab("Year") + ylab("Rainfall Amount (mm)")+coord_flip()}},
       error= function(w){w<-"Load data to continue";return(w)})
-  })
+      })
   
   #Rainfall yearly summary per station
   output$sum_vales <- renderDataTable({
