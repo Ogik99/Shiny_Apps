@@ -5,6 +5,8 @@ library(shiny)
 library(shinythemes)
 library(ggplot2)
 library(plotly)
+library(ggmap)
+library(GGally)
 
 user_interface <-
   fluidPage(
@@ -13,19 +15,28 @@ user_interface <-
       sidebarPanel = sidebarPanel(
         fileInput(
           inputId = "dt_file",
-          label = "csv, xlsx and stata(dta) files only:",
+          label = "Import Data (csv, xlsx and stata(dta) files only):",
           accept = c(".csv", ".dta", ".txt", ".xlsx"),
           placeholder = "data not loaded",
           multiple = FALSE
         ),
-        uiOutput(outputId = "station"),
+        fileInput(
+          inputId = "shape_file",
+          label = "Import Shapefile (Accepts .shp file only):",
+          accept = c(".shp"),
+          placeholder = "Shapefile not loaded",
+          multiple = FALSE
+        ),
+        uiOutput(outputId = "county"),
         uiOutput(outputId = "year_val_start"),
         uiOutput(outputId = "year_val_end"),
         uiOutput(outputId = "month_val"),
         uiOutput(outputId = "cli_element"),
         sliderInput(inputId = "threshold", label = "Threshold (Use it onn Inventory plot):", min = 0, max = 1, value = 0.8),
         uiOutput(outputId = "doy"),
+        checkboxInput(inputId="density", label="Add Densisty Plot", value = FALSE, width = "200px"),
         actionButton("goButton", "Submit"),
+        
         shinythemes::themeSelector()
       ),
       mainPanel = mainPanel(
@@ -100,28 +111,28 @@ r_manipulations <- function(input, output) {
     start_data <- cli_data()
     y1= as.integer(unlist(input$year_val_start))
     y2= as.integer(unlist(input$year_val_end))
-    stations_values<- input$station_vals
-    dplyr::filter(start_data, year%in% y1:y2 & stations %in% stations_values)
+    county_values<- input$county_vals
+    dplyr::filter(start_data, year%in% y1:y2 & county %in% county_values)
     
   })
   
   hist_data<- reactive({
       start_year<-input$year_val_start
     end_year<-input$year_val_end
-    stations_values<- input$station_vals
+    county_values<- input$county_vals
     if(start_year==end_year){ 
       month_lab<- input$month_values
       month_d <- as.data.frame(cli_data())
-      filter(month_d, month==month_lab & year==start_year & stations %in% stations_values)
+      filter(month_d, month==month_lab & year==start_year & county %in% county_values)
     }
   })
   
   
   summaries <- reactive({
     library(dplyr)
-    tryCatch({if(!is.null(input$station_vals)){
+    tryCatch({if(!is.null(input$county_vals)){
       summ_data <- inv_data()
-      summ_data %>% group_by(year, stations) %>%
+      summ_data %>% group_by(year, county) %>%
         summarize(
           rain_sum = sum(rain, na.rm = T),
           average_rain = mean(rain,na.rm = T),
@@ -145,7 +156,7 @@ r_manipulations <- function(input, output) {
   })
   
   st_vals <- reactive({
-    values<- cli_data()[,"stations"]
+    values<- cli_data()[,"county"]
     values <- values[!duplicated(values)]
     
   })
@@ -170,8 +181,8 @@ r_manipulations <- function(input, output) {
     tryCatch({ selectInput("year_val_end", choices = end_vals(), label = "End Year Value:")},error= function(w){w<-"";return(w)})
   })
   
-  output$station <- renderUI({
-    tryCatch({selectInput("station_vals", choices = st_vals(), label = "Station Names(Click in the input to select):", multiple = TRUE)},error= function(w){w<-"";return(w)})
+  output$county <- renderUI({
+    tryCatch({selectInput("county_vals", choices = st_vals(), label = "county Names(Click in the input to select):", multiple = FALSE)},error= function(w){w<-"";return(w)})
   })
   
   output$date_col <- renderUI({
@@ -186,10 +197,22 @@ r_manipulations <- function(input, output) {
   
   output$hist_plots<- renderPlotly({
     req(input$goButton)
-     tryCatch({if(input$doy_input!="doy" && input$year_val_start==input$year_val_end && !is.null(input$station_vals)){
+     if(input$doy_input!="doy" && input$year_val_start==input$year_val_end && !is.null(input$county_vals)){
       plot_data<-as.data.frame(hist_data())
       month<-input$month_values
-     p<- ggplot(plot_data, mapping = aes(x= day_in_month, y= rain))+geom_histogram(stat = "identity", aes(fill= month)) + guides(fill=FALSE)+ggtitle(label = paste(input$month_values,input$year_val_start, "Rainfall Distribution", sep = " "))+theme_light()+xlab("Month Days")+ylab("Amount of Rainfall (mm)")+theme(panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5, size = 18), legend.position = "none")}else{warning("Check Length of Data")}},error= function(w){w<-NULL;return(w)})
+      if(input$density==FALSE){
+        p<- ggplot(plot_data, mapping = aes(x= day_in_month, y= rain))+geom_histogram(stat = "identity", fill= "green") + guides(fill=FALSE)+ggtitle(label = paste(input$month_values,input$year_val_start, "Rainfall Distribution", sep = " "))+theme_light()+xlab("Month Days")+ylab("Amount of Rainfall (mm)")+theme(panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5, size = 18), legend.position = "none")
+
+     }
+     
+     else{
+         
+       p<- ggplot(plot_data, mapping = aes(x= rain))+geom_density(fill="green") + guides(fill=FALSE)+ggtitle(label = paste(input$month_values,input$year_val_start, "Rainfall Distribution", sep = " "))+theme_light()+xlab("Amount of Rainfall (mm)")+ylab("Proportion")+theme(panel.grid.minor = element_blank(),plot.title = element_text(hjust = 0.5, size = 18), legend.position = "none")
+       }
+   
+      
+     
+     }   
     
   })
   
@@ -197,7 +220,7 @@ r_manipulations <- function(input, output) {
   
   output$cli_element <- renderUI({
     nam <-
-      names(cli_data())[!stringr::str_detect(names(cli_data()), pattern = "year|stations|doy|date_col|day_in_month|month")]
+      names(cli_data())[!stringr::str_detect(names(cli_data()), pattern = "year|county|doy|date_col|day_in_month|month")]
     selectInput("cli_input", choices = nam, label = "Climate Element:")
   })
   output$data_sec <- renderDataTable({
@@ -208,7 +231,7 @@ r_manipulations <- function(input, output) {
   
   output$inv_plot <- renderPlotly({
     req(input$goButton)
-    tryCatch({if(input$doy_input=="doy" & !is.null(input$station_vals)){
+    tryCatch({if(input$doy_input=="doy" & !is.null(input$county_vals)){
       
       Full_data <- inv_data()
       #Preparing inventory plot for Quality Control
@@ -240,7 +263,7 @@ r_manipulations <- function(input, output) {
   })
   output$box_plot <- renderPlotly({
        req(input$goButton)
-      tryCatch({if(!is.null(input$station_vals)){
+      tryCatch({if(!is.null(input$county_vals)){
       Full_data <- inv_data()
       ggplot(data = Full_data,
              mapping = aes(
@@ -257,7 +280,7 @@ r_manipulations <- function(input, output) {
       error= function(w){w<-"Load data to continue";return(w)})
       })
   
-  #Rainfall yearly summary per station
+  #Rainfall yearly summary per county
   output$sum_vales <- renderDataTable({
     summaries()
   })
